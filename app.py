@@ -59,30 +59,26 @@ def generate_image(
 def main():
     st.title("SD3 Image Generator App ⚡️")
 
-    prompt = st.text_input("Enter your prompt:")
-    negative_prompt = st.text_input("Enter your negative prompt (optional):")
-    mode = st.selectbox("Select the mode:", ["text-to-image", "image-to-image"])
-    aspect_ratio = st.selectbox(
-        "Select aspect ratio:",
-        ["16:9", "1:1", "21:9", "2:3", "3:2", "4:5", "5:4", "9:16", "9:21"],
-        index=1,
-    )
-    output_format = st.selectbox("Select output format:", ["png", "jpeg"])
-    seed = st.number_input(
-        "Enter seed (optional):", min_value=0, max_value=4294967294, value=0, step=1
-    )
-    models = ["sd3", "sd3-turbo"]
-    model = st.selectbox("Select model:", models)
+    with st.sidebar:
+        prompt = st.text_input("Enter your prompt:")
+        negative_prompt = st.text_input("Enter your negative prompt (optional):")
+        mode = st.selectbox("Select the mode:", ["text-to-image", "image-to-image"])
+        aspect_ratio = st.selectbox("Select aspect ratio:", ["1:1", "16:9", "4:3"])
+        output_format = st.selectbox("Select output format:", ["png", "jpeg"])
+        seed = st.number_input("Enter seed (optional):", min_value=0, value=0, step=1)
+        models = ["sd3", "sd3-turbo"]
+        model = st.selectbox("Select model:", models)
+        num_outputs = st.number_input(
+            "Number of outputs:", min_value=1, max_value=20, value=4, step=1
+        )
 
-    num_outputs = st.number_input(
-        "Number of outputs:", min_value=1, max_value=20, value=4, step=1
-    )
-
-    image_file = None
-    strength = None
-    if mode == "image-to-image":
-        image_file = st.file_uploader("Upload your image:", type=["png", "jpg", "jpeg"])
-        strength = st.slider("Select strength (0.0 to 1.0):", 0.0, 1.0, 0.5)
+        image_file = None
+        strength = None
+        if mode == "image-to-image":
+            image_file = st.file_uploader(
+                "Upload your image:", type=["png", "jpg", "jpeg"]
+            )
+            strength = st.slider("Select strength (0.0 to 1.0):", 0.0, 1.0, 0.5)
 
     if st.button("Generate Image"):
         if not prompt:
@@ -105,30 +101,40 @@ def main():
                         )
                         for _ in range(num_outputs)
                     ]
-                    results = [future.result() for future in futures]
+                results = [future.result() for future in futures]
 
-                    output_folder = "./outputs"
-                    if not os.path.exists(output_folder):
-                        os.makedirs(output_folder)
+                output_folder = "./outputs"
+                if not os.path.exists(output_folder):
+                    os.makedirs(output_folder)
 
-                    for result in results:
-                        if result.status_code == 200:
-                            current_time = (
-                                datetime.datetime.now()
-                                .strftime("%Y%m%d_%H%M%S")
-                                .lower()
-                            )
-                            model_prefix = "sd3" if model == "sd3" else "sd3_turbo"
-                            output_image_path = f"{output_folder}/{model_prefix}_output_{current_time}.{output_format}"
-                            with open(output_image_path, "wb") as file:
-                                file.write(result.content)
+                cols = st.columns(
+                    3,
+                    gap="10px",
+                    use_container_width=True,
+                )  # Adjust the number of columns based on your preference
+                idx = 0
+                for result in results:
+                    if result is not None and result.status_code == 200:
+                        current_time = (
+                            datetime.datetime.now().strftime("%Y%m%d_%H%M%S").lower()
+                        )
+                        model_prefix = "sd3" if model == "sd3" else "sd3_turbo"
+                        output_image_path = f"{output_folder}/{model_prefix}_output_{current_time}.{output_format}"
+                        with open(output_image_path, "wb") as file:
+                            file.write(result.content)
+                        with cols[idx % 3]:
                             st.image(
                                 output_image_path, caption=f"Generated with {model}"
                             )
-                        else:
-                            st.error(
-                                f"Failed to generate with {model}: {result.status_code} - {result.text}"
-                            )
+                        idx += 1
+                    elif result is None:
+                        st.error(
+                            f"Failed to generate with {model}: No response received."
+                        )
+                    else:
+                        st.error(
+                            f"Failed to generate with {model}: {result.status_code} - {result.text}"
+                        )
 
 
 if __name__ == "__main__":
