@@ -4,6 +4,9 @@ import datetime
 import os
 import concurrent.futures
 import time
+import base64
+import json
+import re
 
 
 def generate_image(
@@ -20,7 +23,8 @@ def generate_image(
     url = "https://api.stability.ai/v2beta/stable-image/generate/sd3"
     headers = {
         "Authorization": f"Bearer {os.getenv('STABILITYAI_API_KEY')}",
-        "Accept": "image/*",
+        # "Accept": "image/*",
+        "Accept": "application/json",
     }
 
     files = {
@@ -57,6 +61,7 @@ def generate_image(
 
 
 def main():
+    RESULTS = []
     st.title("SD3 Image Generator App ⚡️")
 
     with st.sidebar:
@@ -80,61 +85,83 @@ def main():
             )
             strength = st.slider("Select strength (0.0 to 1.0):", 0.0, 1.0, 0.5)
 
-    if st.button("Generate Image"):
-        if not prompt:
-            st.error("Please enter a prompt.")
-        else:
-            with st.spinner("Generating images..."):
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    futures = [
-                        executor.submit(
-                            generate_image,
-                            prompt,
-                            model,
-                            mode,
-                            aspect_ratio,
-                            output_format,
-                            image_file,
-                            strength,
-                            negative_prompt,
-                            seed,
-                        )
-                        for _ in range(num_outputs)
-                    ]
-                results = [future.result() for future in futures]
-
-                output_folder = "./outputs"
-                if not os.path.exists(output_folder):
-                    os.makedirs(output_folder)
-
-                cols = st.columns(
-                    3,
-                    gap="10px",
-                    use_container_width=True,
-                )  # Adjust the number of columns based on your preference
-                idx = 0
-                for result in results:
-                    if result is not None and result.status_code == 200:
-                        current_time = (
-                            datetime.datetime.now().strftime("%Y%m%d_%H%M%S").lower()
-                        )
-                        model_prefix = "sd3" if model == "sd3" else "sd3_turbo"
-                        output_image_path = f"{output_folder}/{model_prefix}_output_{current_time}.{output_format}"
-                        with open(output_image_path, "wb") as file:
-                            file.write(result.content)
-                        with cols[idx % 3]:
-                            st.image(
-                                output_image_path, caption=f"Generated with {model}"
+        if st.button("Generate Image"):
+            if not prompt:
+                st.error("Please enter a prompt.")
+            else:
+                with st.spinner("Generating images..."):
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        futures = [
+                            executor.submit(
+                                generate_image,
+                                prompt,
+                                model,
+                                mode,
+                                aspect_ratio,
+                                output_format,
+                                image_file,
+                                strength,
+                                negative_prompt,
+                                seed,
                             )
-                        idx += 1
-                    elif result is None:
-                        st.error(
-                            f"Failed to generate with {model}: No response received."
-                        )
-                    else:
-                        st.error(
-                            f"Failed to generate with {model}: {result.status_code} - {result.text}"
-                        )
+                            for _ in range(num_outputs)
+                        ]
+                    RESULTS = [future.result() for future in futures]
+
+    output_folder = "./outputs"
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
+    cols = st.columns(
+        3,
+        gap="medium",
+    )  # Adjust the number of columns based on your preference
+    idx = 0
+    for result in RESULTS:
+        if result is not None and result.status_code == 200:
+            current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S").lower()
+            model_prefix = "sd3" if model == "sd3" else "sd3_turbo"
+
+            output_image_path = (
+                f"{output_folder}/{model_prefix}_output_{current_time}.{output_format}"
+            )
+
+            # Extracting the boundary from the content type header
+            boundary = result.request.headers["Content-Type"].split("boundary=")[1]
+            parts = re.split(
+                r"--" + re.escape(boundary), result.request.body.decode("utf-8")
+            )
+            request_data = {}
+
+            # Parsing each part into a dictionary
+            for part in parts:
+                content_disposition_match = re.search(
+                    r'Content-Disposition: form-data; name="([^"]+)"', part
+                )
+                if content_disposition_match:
+                    name = content_disposition_match.group(1)
+                    # Find the content after the first two newlines, which will be the value
+                    value = part.split("\r\n\r\n", 1)[-1].rstrip("\r\n--")
+                    request_data[name] = value
+
+            # Writing the dictionary to a JSON file
+            json_output_path = f"{output_image_path}.json"
+            with open(json_output_path, "w") as json_file:
+                request_data["seed"] = result.json().get("seed")
+                json.dump(request_data, json_file, indent=4)
+
+            image_data = base64.b64decode(result.json()["image"])
+            with open(output_image_path, "wb") as file:
+                file.write(image_data)
+            with cols[idx % 3]:
+                st.image(output_image_path, caption=f"Generated with {model}")
+            idx += 1
+        elif result is None:
+            st.error(f"Failed to generate with {model}: No response received.")
+        else:
+            st.error(
+                f"Failed to generate with {model}: {result.status_code} - {result.text}"
+            )
 
 
 if __name__ == "__main__":
