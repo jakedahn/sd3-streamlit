@@ -68,7 +68,11 @@ def main():
         prompt = st.text_input("Enter your prompt:")
         negative_prompt = st.text_input("Enter your negative prompt (optional):")
         mode = st.selectbox("Select the mode:", ["text-to-image", "image-to-image"])
-        aspect_ratio = st.selectbox("Select aspect ratio:", ["1:1", "16:9", "4:3"])
+        aspect_ratio = st.selectbox(
+            "Select aspect ratio:",
+            ["16:9", "1:1", "21:9", "2:3", "3:2", "4:5", "5:4", "9:16", "9:21"],
+            index=1,
+        )
         output_format = st.selectbox("Select output format:", ["png", "jpeg"])
         seed = st.number_input("Enter seed (optional):", min_value=0, value=0, step=1)
         models = ["sd3", "sd3-turbo"]
@@ -119,27 +123,32 @@ def main():
     idx = 0
     for result in RESULTS:
         if result is not None and result.status_code == 200:
+            result_seed = result.json().get("seed")
             current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S").lower()
             model_prefix = "sd3" if model == "sd3" else "sd3_turbo"
 
-            output_image_path = (
-                f"{output_folder}/{model_prefix}_output_{current_time}.{output_format}"
-            )
+            output_image_path = f"{output_folder}/{model_prefix}_output_{current_time}__seed_{result_seed}.{output_format}"
 
             # Extracting the boundary from the content type header
             boundary = result.request.headers["Content-Type"].split("boundary=")[1]
+
             parts = re.split(
-                r"--" + re.escape(boundary), result.request.body.decode("utf-8")
+                r"--" + re.escape(boundary), result.request.body.decode("latin1")
             )
             request_data = {}
 
             # Parsing each part into a dictionary
             for part in parts:
                 content_disposition_match = re.search(
-                    r'Content-Disposition: form-data; name="([^"]+)"', part
+                    r'Content-Disposition: form-data; name="([^"]+)"(?:; filename="([^"]+)")?',
+                    part,
                 )
                 if content_disposition_match:
                     name = content_disposition_match.group(1)
+                    filename = content_disposition_match.group(2)
+                    if filename:  # Record filename but skip file data
+                        request_data[name + "_filename"] = filename
+                        continue
                     # Find the content after the first two newlines, which will be the value
                     value = part.split("\r\n\r\n", 1)[-1].rstrip("\r\n--")
                     request_data[name] = value
@@ -147,7 +156,7 @@ def main():
             # Writing the dictionary to a JSON file
             json_output_path = f"{output_image_path}.json"
             with open(json_output_path, "w") as json_file:
-                request_data["seed"] = result.json().get("seed")
+                request_data["seed"] = result_seed
                 json.dump(request_data, json_file, indent=4)
 
             image_data = base64.b64decode(result.json()["image"])
