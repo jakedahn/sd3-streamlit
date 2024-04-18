@@ -7,7 +7,15 @@ import time
 
 
 def generate_image(
-    prompt, model, mode, aspect_ratio, output_format, image_path=None, strength=None
+    prompt,
+    model,
+    mode,
+    aspect_ratio,
+    output_format,
+    image_path=None,
+    strength=None,
+    negative_prompt=None,
+    seed=None,
 ):
     url = "https://api.stability.ai/v2beta/stable-image/generate/sd3"
     headers = {
@@ -30,6 +38,10 @@ def generate_image(
             files["image"] = (image_path.name, image_path.getvalue(), "image/png")
         if strength is not None:
             files["strength"] = (None, str(strength))
+    if negative_prompt:
+        files["negative_prompt"] = (None, negative_prompt)
+    if seed is not None:
+        files["seed"] = (None, str(seed))
 
     # Log the files dictionary for debugging
     st.write("Sending the following data to the API:")
@@ -48,17 +60,29 @@ def main():
     st.title("SD3 Image Generator App ⚡️")
 
     prompt = st.text_input("Enter your prompt:")
+    negative_prompt = st.text_input("Enter your negative prompt (optional):")
     mode = st.selectbox("Select the mode:", ["text-to-image", "image-to-image"])
+    aspect_ratio = st.selectbox(
+        "Select aspect ratio:",
+        ["16:9", "1:1", "21:9", "2:3", "3:2", "4:5", "5:4", "9:16", "9:21"],
+        index=1,
+    )
+    output_format = st.selectbox("Select output format:", ["png", "jpeg"])
+    seed = st.number_input(
+        "Enter seed (optional):", min_value=0, max_value=4294967294, value=0, step=1
+    )
+    models = ["sd3", "sd3-turbo"]
+    model = st.selectbox("Select model:", models)
+
+    num_outputs = st.number_input(
+        "Number of outputs:", min_value=1, max_value=20, value=4, step=1
+    )
 
     image_file = None
     strength = None
     if mode == "image-to-image":
         image_file = st.file_uploader("Upload your image:", type=["png", "jpg", "jpeg"])
         strength = st.slider("Select strength (0.0 to 1.0):", 0.0, 1.0, 0.5)
-
-    aspect_ratio = "1:1"
-    output_format = "png"
-    models = ["sd3", "sd3-turbo"]
 
     if st.button("Generate Image"):
         if not prompt:
@@ -76,8 +100,10 @@ def main():
                             output_format,
                             image_file,
                             strength,
+                            negative_prompt,
+                            seed,
                         )
-                        for model in models
+                        for _ in range(num_outputs)
                     ]
                     results = [future.result() for future in futures]
 
@@ -85,7 +111,7 @@ def main():
                     if not os.path.exists(output_folder):
                         os.makedirs(output_folder)
 
-                    for result, model in zip(results, models):
+                    for result in results:
                         if result.status_code == 200:
                             current_time = (
                                 datetime.datetime.now()
